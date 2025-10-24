@@ -2120,7 +2120,7 @@ any of these options.
 	frame, foot proceeds with rendering the cells that has changed
 	between the last frame and the new frame.
 	
-	When this open is enabled, the changes between the last two frames
+	When this option is enabled, the changes between the last two frames
 	are brought over to what will become the next frame before foot
 	starts rendering the next frame. As soon as the compositor
 	releases the previous buffer (typically right after foot has
