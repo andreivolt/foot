@@ -923,6 +923,9 @@ parse_section_main(struct context *ctx)
     else if (streq(key, "app-id"))
         return value_to_str(ctx, &conf->app_id);
 
+    else if (streq(key, "toplevel-tag"))
+        return value_to_str(ctx, &conf->toplevel_tag);
+
     else if (streq(key, "initial-window-size-pixels")) {
         if (!value_to_dimensions(ctx, &conf->size.width, &conf->size.height))
             return false;
@@ -3371,6 +3374,7 @@ config_load(struct config *conf, const char *conf_path,
         .shell = get_shell(),
         .title = xstrdup("foot"),
         .app_id = (as_server ? xstrdup("footclient") : xstrdup("foot")),
+        .toplevel_tag = xstrdup(""),
         .word_delimiters = xc32dup(U",│`|:\"'()[]{}<>"),
         .size = {
             .type = CONF_SIZE_PX,
@@ -3823,6 +3827,7 @@ config_clone(const struct config *old)
     conf->shell = xstrdup(old->shell);
     conf->title = xstrdup(old->title);
     conf->app_id = xstrdup(old->app_id);
+    conf->toplevel_tag = xstrdup(old->toplevel_tag);
     conf->word_delimiters = xc32dup(old->word_delimiters);
     conf->scrollback.indicator.text = xc32dup(old->scrollback.indicator.text);
     conf->server_socket_path = xstrdup(old->server_socket_path);
@@ -3922,6 +3927,7 @@ config_free(struct config *conf)
     free(conf->shell);
     free(conf->title);
     free(conf->app_id);
+    free(conf->toplevel_tag);
     free(conf->word_delimiters);
     spawn_template_free(&conf->bell.command);
     free(conf->scrollback.indicator.text);

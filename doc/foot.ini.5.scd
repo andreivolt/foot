@@ -429,6 +429,11 @@ empty string to be set, but it must be quoted: *KEY=""*)
 	apply window management rules. Default: _foot_ (normal mode), or
 	_footclient_ (server mode).
 
+*toplevel-tag*
+	Value to set the *toplevel-tag* property on the Wayland window
+	to. The compositor can use this value for session management,
+	window rules etc. Default: _not set_
+
 *bold-text-in-bright*
 	Semi-boolean. When enabled, bold text is rendered in a brighter
 	color (in addition to using a bold font). The color is brightened

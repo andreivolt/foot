@@ -84,6 +84,7 @@ print_usage(const char *prog_name)
         "  -t,--term=TERM                           value to set the environment variable TERM to (" FOOT_DEFAULT_TERM ")\n"
         "  -T,--title=TITLE                         initial window title (foot)\n"
         "  -a,--app-id=ID                           window application ID (foot)\n"
+        "     --toplevel-tag=TAG                    set a custom toplevel tag\n"
         "  -m,--maximized                           start in maximized mode\n"
         "  -F,--fullscreen                          start in fullscreen mode\n"
         "  -L,--login-shell                         start shell as a login shell\n"
@@ -185,6 +186,7 @@ sanitize_signals(void)
 
 enum {
     PTY_OPTION = CHAR_MAX + 1,
+    TOPLEVEL_TAG_OPTION = CHAR_MAX + 2,
 };
 
 int
@@ -214,6 +216,7 @@ main(int argc, char *const *argv)
         {"term",                   required_argument, NULL, 't'},
         {"title",                  required_argument, NULL, 'T'},
         {"app-id",                 required_argument, NULL, 'a'},
+        {"toplevel-tag",           required_argument, NULL, TOPLEVEL_TAG_OPTION},
         {"login-shell",            no_argument,       NULL, 'L'},
         {"working-directory",      required_argument, NULL, 'D'},
         {"font",                   required_argument, NULL, 'f'},
@@ -283,6 +286,10 @@ main(int argc, char *const *argv)
 
         case 'a':
             tll_push_back(overrides, xstrjoin("app-id=", optarg));
+            break;
+
+        case TOPLEVEL_TAG_OPTION:
+            tll_push_back(overrides, xstrjoin("toplevel-tag=", optarg));
             break;
 
         case 'D': {

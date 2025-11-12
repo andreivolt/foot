@@ -1548,6 +1548,17 @@ handle_global(void *data, struct wl_registry *registry,
             wayl->color_management.manager, &color_manager_listener, wayl);
     }
 
+#if defined(HAVE_XDG_TOPLEVEL_TAG)
+    else if (streq(interface, xdg_toplevel_tag_manager_v1_interface.name)) {
+        const uint32_t required = 1;
+        if (!verify_iface_version(interface, version, required))
+            return;
+
+        wayl->toplevel_tag_manager = wl_registry_bind(
+            wayl->registry, name, &xdg_toplevel_tag_manager_v1_interface, required);
+    }
+#endif
+
 #if defined(FOOT_IME_ENABLED) && FOOT_IME_ENABLED
     else if (streq(interface, zwp_text_input_manager_v3_interface.name)) {
         const uint32_t required = 1;
@@ -1791,7 +1802,7 @@ wayl_init(struct fdm *fdm, struct key_binding_manager *key_binding_manager,
     }
 
     if (wayl->toplevel_icon_manager == NULL) {
-        LOG_WARN("compositor does not implement the XDG toplevel icon protocol");
+        LOG_WARN("compositor does not implement the xdg-toplevel-icon protocol");
     }
 
 #if defined(FOOT_IME_ENABLED) && FOOT_IME_ENABLED
@@ -1868,6 +1879,11 @@ wayl_destroy(struct wayland *wayl)
 #if defined(FOOT_IME_ENABLED) && FOOT_IME_ENABLED
     if (wayl->text_input_manager != NULL)
         zwp_text_input_manager_v3_destroy(wayl->text_input_manager);
+#endif
+
+#if defined(HAVE_XDG_TOPLEVEL_TAG)
+    if (wayl->toplevel_tag_manager != NULL)
+        xdg_toplevel_tag_manager_v1_destroy(wayl->toplevel_tag_manager);
 #endif
 
     if (wayl->color_management.img_description != NULL)
@@ -1994,6 +2010,21 @@ wayl_win_init(struct terminal *term, const char *token)
     xdg_toplevel_add_listener(win->xdg_toplevel, &xdg_toplevel_listener, win);
 
     xdg_toplevel_set_app_id(win->xdg_toplevel, conf->app_id);
+
+#if defined(HAVE_XDG_TOPLEVEL_TAG)
+    if (conf->toplevel_tag != NULL && conf->toplevel_tag[0] != '\0') {
+        if (wayl->toplevel_tag_manager != NULL) {
+            xdg_toplevel_tag_manager_v1_set_toplevel_tag(
+                wayl->toplevel_tag_manager, win->xdg_toplevel, conf->toplevel_tag);
+
+            /* TODO: the description is recommended to be the tag, but translated */
+            xdg_toplevel_tag_manager_v1_set_toplevel_description(
+                wayl->toplevel_tag_manager, win->xdg_toplevel, conf->toplevel_tag);
+        } else {
+            LOG_WARN("compositor does not implement the xdg-toplevel-tag protocol");
+        }
+    }
+#endif
 
     if (wayl->toplevel_icon_manager != NULL) {
         const char *app_id =

@@ -219,6 +219,7 @@ struct config {
     char *shell;
     char *title;
     char *app_id;
+    char *toplevel_tag;
     char32_t *word_delimiters;
     bool login_shell;
     bool locked_title;

@@ -76,6 +76,7 @@ print_usage(const char *prog_name)
         "  -t,--term=TERM                           value to set the environment variable TERM to (" FOOT_DEFAULT_TERM ")\n"
         "  -T,--title=TITLE                         initial window title (foot)\n"
         "  -a,--app-id=ID                           window application ID (foot)\n"
+        "     --toplevel-tag=TAG                    set a custom toplevel tag\n"
         "  -w,--window-size-pixels=WIDTHxHEIGHT     initial width and height, in pixels\n"
         "  -W,--window-size-chars=WIDTHxHEIGHT      initial width and height, in characters\n"
         "  -m,--maximized                           start in maximized mode\n"
@@ -137,6 +138,10 @@ send_string_list(int fd, const string_list_t *string_list)
     return true;
 }
 
+enum {
+    TOPLEVEL_TAG_OPTION = CHAR_MAX + 1,
+};
+
 int
 main(int argc, char *const *argv)
 {
@@ -151,6 +156,7 @@ main(int argc, char *const *argv)
         {"term",               required_argument, NULL, 't'},
         {"title",              required_argument, NULL, 'T'},
         {"app-id",             required_argument, NULL, 'a'},
+        {"toplevel-tag",       required_argument, NULL, TOPLEVEL_TAG_OPTION},
         {"window-size-pixels", required_argument, NULL, 'w'},
         {"window-size-chars",  required_argument, NULL, 'W'},
         {"maximized",          no_argument,       NULL, 'm'},
@@ -216,6 +222,12 @@ main(int argc, char *const *argv)
 
         case 'a':
             snprintf(buf, sizeof(buf), "app-id=%s", optarg);
+            if (!push_string(&overrides, buf, &total_len))
+                goto err;
+            break;
+
+        case TOPLEVEL_TAG_OPTION:
+            snprintf(buf, sizeof(buf), "toplevel-tag=%s", optarg);
             if (!push_string(&overrides, buf, &total_len))
                 goto err;
             break;

@@ -67,6 +67,11 @@ the foot command line
 	Value to set the *app-id* property on the Wayland window
 	to. Default: _foot_ (normal mode), or _footclient_ (server mode).
 
+*toplevel-tag*=_TAG_
+	Value to set the *toplevel-tag* property on the Wayland window
+	to. The compositor can use this value for session management,
+	window rules etc. Default: _not set_
+
 *-m*,*--maximized*
 	Start in maximized mode. If both *--maximized* and *--fullscreen*
 	are specified, the _last_ one takes precedence.

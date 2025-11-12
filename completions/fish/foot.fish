@@ -6,6 +6,7 @@ complete -c foot -x -s f -l font               -a "(fc-list : family | sed 's/,/
 complete -c foot -x -s t -l term               -a '(find /usr/share/terminfo -type f -printf "%f\n")' -d "value to set the environment variable TERM to (foot)"
 complete -c foot -x -s T -l title                                                                     -d "initial window title"
 complete -c foot -x -s a -l app-id                                                                    -d "value to set the app-id property on the Wayland window to (foot)"
+complete -c foot -x      -l toplevel-tag                                                              -d "value to set the toplevel-tag property on the Wayland window to"
 complete -c foot    -s m -l maximized                                                                 -d "start in maximized mode"
 complete -c foot    -s F -l fullscreen                                                                -d "start in fullscreen mode"
 complete -c foot    -s L -l login-shell                                                               -d "start shell as a login shell"

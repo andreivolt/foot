@@ -23,6 +23,10 @@
 #include <xdg-system-bell-v1.h>
 #include <xdg-toplevel-icon-v1.h>
 
+#if defined(HAVE_XDG_TOPLEVEL_TAG)
+ #include <xdg-toplevel-tag-v1.h>
+#endif
+
 #include <fcft/fcft.h>
 #include <tllist.h>
 
@@ -480,6 +484,10 @@ struct wayland {
     bool presentation_timings;
     struct wp_presentation *presentation;
     uint32_t presentation_clock_id;
+
+#if defined(HAVE_XDG_TOPLEVEL_TAG)
+    struct xdg_toplevel_tag_manager_v1 *toplevel_tag_manager;
+#endif
 
 #if defined(FOOT_IME_ENABLED) && FOOT_IME_ENABLED
     struct zwp_text_input_manager_v3 *text_input_manager;

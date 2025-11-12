@@ -22,6 +22,12 @@ const char version_and_features[] =
     " -graphemes"
 #endif
 
+#if defined(HAVE_XDG_TOPLEVEL_TAG)
+    " +toplevel-tag"
+#else
+    " -toplevel-tag"
+#endif
+
 #if !defined(NDEBUG)
     " +assertions"
 #else

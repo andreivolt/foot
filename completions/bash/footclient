@@ -6,6 +6,7 @@ _footclient()
     local cur prev flags word commands match previous_words i offset
     flags=(
         "--app-id"
+        "--toplevel-tag"
         "--fullscreen"
         "--help"
         "--hold"
@@ -35,7 +36,7 @@ _footclient()
     for word in "${previous_words[@]}" ; do
         match=$(printf "$commands" | grep -Fx "$word" 2>/dev/null)
         if [[ ! -z "$match" ]] ; then
-            if [[ ${COMP_WORDS[i-1]} =~ ^(--app-id|--log-level|--server-socket|--term|--title|--window-size-pixels|--window-size-chars|--working-directory)$ ]] ; then
+            if [[ ${COMP_WORDS[i-1]} =~ ^(--app-id|--toplevel-tag|--log-level|--server-socket|--term|--title|--window-size-pixels|--window-size-chars|--working-directory)$ ]] ; then
                 (( i++ ))
                 continue
             fi
@@ -67,7 +68,7 @@ _footclient()
         COMPREPLY=( $(compgen -W "none error warning info" -- ${cur}) ) ;;
     --log-colorize|-l)
         COMPREPLY=( $(compgen -W "never always auto" -- ${cur}) ) ;;
-    --app-id|--help|--override|--title|--version|--window-size-chars|--window-size-pixels|-[ahoTvWw])
+    --app-id|--toplevel-tag|--help|--override|--title|--version|--window-size-chars|--window-size-pixels|-[ahoTvWw])
         # Don't autocomplete for these flags
         : ;;
     *)

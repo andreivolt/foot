@@ -6,6 +6,7 @@ _foot()
     local cur prev flags word commands match previous_words i offset
     flags=(
         "--app-id"
+        "--toplevel-tag"
         "--check-config"
         "--config"
         "--font"
@@ -40,7 +41,7 @@ _foot()
     for word in "${previous_words[@]}" ; do
         match=$(printf "$commands" | grep -Fx "$word" 2>/dev/null)
         if [[ ! -z "$match" ]] ; then
-            if [[ ${COMP_WORDS[i-1]} =~ ^(--app-id|--config|--font|--log-level|--pty|--term|--title|--window-size-pixels|--window-size-chars|--working-directory)$ ]] ; then
+            if [[ ${COMP_WORDS[i-1]} =~ ^(--app-id|--toplevel-tag|--config|--font|--log-level|--pty|--term|--title|--window-size-pixels|--window-size-chars|--working-directory)$ ]] ; then
                 (( i++ ))
                 continue
             fi
@@ -75,7 +76,7 @@ _foot()
         COMPREPLY=( $(compgen -W "none error warning info" -- ${cur}) ) ;;
     --log-colorize|-l)
         COMPREPLY=( $(compgen -W "never always auto" -- ${cur}) ) ;;
-    --app-id|--help|--override|--pty|--title|--version|--window-size-chars|--window-size-pixels|--check-config|-[ahoTvWwC])
+    --app-id|--toplevel-tag|--help|--override|--pty|--title|--version|--window-size-chars|--window-size-pixels|--check-config|-[ahoTvWwC])
         # Don't autocomplete for these flags
         : ;;
     *)

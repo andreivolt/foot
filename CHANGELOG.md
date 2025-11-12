@@ -69,6 +69,15 @@
 
 ## Unreleased
 ### Added
+
+* `toplevel-tag` option (and `--toplevel-tag` command line options to
+  `foot` and `footclient`), allowing you to set a custom toplevel
+  tag. The compositor must implement the new `xdg-toplevel-tag-v1`
+  Wayland protocol ([#2212][2212]).
+
+[2212]: https://codeberg.org/dnkl/foot/issues/2212
+
+
 ### Changed
 
 * When enabling _"focus mode"_ (private mode 1004), foot now sends a
