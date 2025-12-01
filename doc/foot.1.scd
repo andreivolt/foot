@@ -257,9 +257,6 @@ These keyboard shortcuts affect the search selection:
 *ctrl*+*shift*+*left*
 	Extend current selection to the left to the last word boundary.
 
-*ctrl*+*shift*+*w*
-	Extend the current selection to the right to the last whitespace.
-
 *shift*+*down*
 	Extend current selection down one line
 
