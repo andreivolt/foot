@@ -3165,10 +3165,16 @@ term_scroll_reverse_partial(struct terminal *term,
 
     sixel_scroll_down(term, rows);
 
-    bool view_follows = term->grid->view == term->grid->offset;
+    const bool view_follows = term->grid->view == term->grid->offset;
     term->grid->offset -= rows;
     term->grid->offset += term->grid->num_rows;
     term->grid->offset &= term->grid->num_rows - 1;
+
+    /* How many lines from the scrollback start is the current viewport? */
+    const int view_sb_start_distance = grid_row_abs_to_sb(
+        term->grid, term->rows, term->grid->view);
+    const int offset_sb_start_distance = grid_row_abs_to_sb(
+        term->grid, term->rows, term->grid->offset);
 
     xassert(term->grid->offset >= 0);
     xassert(term->grid->offset < term->grid->num_rows);
@@ -3177,6 +3183,11 @@ term_scroll_reverse_partial(struct terminal *term,
         term_damage_scroll(term, DAMAGE_SCROLL_REVERSE, region, rows);
         selection_view_up(term, term->grid->offset);
         term->grid->view = term->grid->offset;
+    } else if (unlikely(view_sb_start_distance > offset_sb_start_distance)) {
+        /* Part of current view is being scrolled out */
+        int new_view = term->grid->offset;
+        selection_view_up(term, new_view);
+        term->grid->view = new_view;
     }
 
     /* Bottom non-scrolling region */
@@ -3193,11 +3204,16 @@ term_scroll_reverse_partial(struct terminal *term,
         erase_line(term, row);
     }
 
+    if (unlikely(view_sb_start_distance > offset_sb_start_distance))
+        term_damage_view(term);
+
     term->grid->cur_row = grid_row(term->grid, term->grid->cursor.point.row);
 
 #if defined(_DEBUG)
     for (int r = 0; r < term->rows; r++)
         xassert(grid_row(term->grid, r) != NULL);
+    for (int r = 0; r < term->rows; r++)
+        xassert(grid_row_in_view(term->grid, r) != NULL);
 #endif
 }
 
