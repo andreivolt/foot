@@ -1,7 +1,7 @@
 # -*- yaml -*-
 
 steps:
-  - name: codespell
+  - name: pychecks
     when:
       - event: [manual, pull_request]
       - event: [push, tag]
@@ -11,26 +11,12 @@ steps:
       - apk add openssl
       - apk add python3
       - apk add py3-pip
-      - python3 -m venv codespell-venv
-      - source codespell-venv/bin/activate
+      - python3 -m venv venv
+      - source venv/bin/activate
       - pip install codespell
-      - codespell
-      - deactivate
-
-  - name: mypy
-    when:
-      - event: [manual, pull_request]
-      - event: [push, tag]
-        branch: [master, releases/*]
-    image: alpine:edge
-    commands:
-      - apk add openssl
-      - apk add python3
-      - apk add py3-pip
-      - python3 -m venv mypy-venv
-      - source mypy-venv/bin/activate
       - pip install mypy
       - pip install ruff
+      - codespell
       - mypy
       - ruff check
       - deactivate
