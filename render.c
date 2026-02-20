@@ -1,7 +1,9 @@
 #include "render.h"
 
 #include <limits.h>
+#include <math.h>
 #include <signal.h>
+#include <stdatomic.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -287,6 +289,100 @@ color_blend_towards(uint32_t from, uint32_t to, float amount)
     uint8_t b = i_lerp((from>>0)&0xff, (to>>0)&0xff, t);
 
     return alpha | (r<<16) | (g<<8) | (b<<0);
+}
+
+/*
+ * Text thickness compensation for gamma-correct blending.
+ *
+ * When blending in linear color space, antialiased text appears thinner
+ * than in sRGB space, especially light text on dark backgrounds. This
+ * compensates by applying a gamma curve to glyph alpha masks, boosting
+ * mid-range alpha values to restore perceived stem weight.
+ *
+ * The correction is luminance-adaptive: full compensation for light-on-dark,
+ * no compensation for dark-on-light (which already appears correct).
+ */
+#define TEXT_CONTRAST_BUCKETS 16
+
+static uint8_t text_contrast_lut[TEXT_CONTRAST_BUCKETS][256];
+static atomic_bool text_contrast_lut_ready;
+static float text_contrast_lut_param;
+
+static void
+ensure_text_contrast_lut(float compensation)
+{
+    if (atomic_load_explicit(&text_contrast_lut_ready, memory_order_acquire) &&
+        text_contrast_lut_param == compensation)
+        return;
+
+    for (int bucket = 0; bucket < TEXT_CONTRAST_BUCKETS; bucket++) {
+        float factor = (float)bucket / (TEXT_CONTRAST_BUCKETS - 1);
+        float gamma = 1.0f - compensation * factor;
+        if (gamma < 0.3f)
+            gamma = 0.3f;
+
+        for (int a = 0; a < 256; a++) {
+            float af = (float)a / 255.0f;
+            float adj = powf(af, gamma);
+            int r = (int)(adj * 255.0f + 0.5f);
+            text_contrast_lut[bucket][a] = (uint8_t)(r > 255 ? 255 : r);
+        }
+    }
+
+    text_contrast_lut_param = compensation;
+    atomic_store_explicit(&text_contrast_lut_ready, true, memory_order_release);
+}
+
+static inline float
+luminance_from_hex(uint32_t color)
+{
+    float r = ((color >> 16) & 0xff) / 255.0f;
+    float g = ((color >> 8) & 0xff) / 255.0f;
+    float b = (color & 0xff) / 255.0f;
+    return 0.2126f * r + 0.7152f * g + 0.0722f * b;
+}
+
+/*
+ * Thread-local reusable buffer for alpha mask adjustment.
+ * Avoids malloc/free per glyph during rendering.
+ */
+static _Thread_local uint8_t *tl_contrast_buf;
+static _Thread_local size_t tl_contrast_buf_size;
+
+/* Create an adjusted alpha mask with thickness compensation applied.
+ * Uses a thread-local buffer - the returned image is valid until the
+ * next call to this function from the same thread. */
+static pixman_image_t *
+create_contrast_mask(const struct fcft_glyph *glyph, const uint8_t *lut)
+{
+    int w = glyph->width;
+    int h = glyph->height;
+    if (w <= 0 || h <= 0)
+        return NULL;
+
+    int src_stride = pixman_image_get_stride(glyph->pix);
+    int dst_stride = (w + 3) & ~3;
+    size_t needed = (size_t)dst_stride * h;
+
+    if (needed > tl_contrast_buf_size) {
+        free(tl_contrast_buf);
+        tl_contrast_buf = xmalloc(needed);
+        tl_contrast_buf_size = needed;
+    }
+
+    const uint8_t *src = (const uint8_t *)pixman_image_get_data(glyph->pix);
+
+    for (int row = 0; row < h; row++) {
+        const uint8_t *srow = src + row * src_stride;
+        uint8_t *drow = tl_contrast_buf + row * dst_stride;
+        for (int c = 0; c < w; c++)
+            drow[c] = lut[srow[c]];
+    }
+
+    pixman_image_t *mask = pixman_image_create_bits_no_clear(
+        PIXMAN_a8, w, h, (uint32_t *)tl_contrast_buf, dst_stride);
+
+    return mask;
 }
 
 static inline uint32_t
@@ -849,6 +945,25 @@ render_cell(struct terminal *term, pixman_image_t *pix,
     pixman_color_t fg = color_hex_to_pixman(_fg, gamma_correct);
     pixman_color_t bg = color_hex_to_pixman_with_alpha(_bg, alpha, gamma_correct);
 
+    /* Text thickness compensation: select LUT based on fg/bg luminance */
+    const float compensation = term->conf->tweak.text_thickness_compensation;
+    const uint8_t *alpha_lut = NULL;
+
+    if (gamma_correct && compensation > 0.0f) {
+        ensure_text_contrast_lut(compensation);
+
+        float fg_lum = luminance_from_hex(_fg);
+        float bg_lum = luminance_from_hex(_bg);
+        float lum_diff = fg_lum - bg_lum;
+
+        if (lum_diff > 0.02f) {
+            int bucket = (int)(lum_diff * (TEXT_CONTRAST_BUCKETS - 1) + 0.5f);
+            if (bucket >= TEXT_CONTRAST_BUCKETS)
+                bucket = TEXT_CONTRAST_BUCKETS - 1;
+            alpha_lut = text_contrast_lut[bucket];
+        }
+    }
+
     struct fcft_font *font = attrs_to_font(term, &cell->attrs);
     const struct composed *composed = NULL;
     const struct fcft_grapheme *grapheme = NULL;
@@ -1068,10 +1183,25 @@ render_cell(struct terminal *term, pixman_image_t *pix,
                     glyph->width, glyph->height);
             }
         } else {
+            /* Apply thickness compensation mask if available */
+            pixman_image_t *mask = glyph->pix;
+            pixman_image_t *adj_mask = NULL;
+
+            if (alpha_lut != NULL &&
+                !pixman_image_get_component_alpha(glyph->pix))
+            {
+                adj_mask = create_contrast_mask(glyph, alpha_lut);
+                if (adj_mask != NULL)
+                    mask = adj_mask;
+            }
+
             pixman_image_composite32(
-                PIXMAN_OP_OVER, clr_pix, glyph->pix, pix, 0, 0, 0, 0,
+                PIXMAN_OP_OVER, clr_pix, mask, pix, 0, 0, 0, 0,
                 pen_x + letter_x_ofs + g_x, y + term->font_baseline - g_y,
                 glyph->width, glyph->height);
+
+            if (adj_mask != NULL)
+                pixman_image_unref(adj_mask);
 
             /* Combining characters */
             if (composed != NULL) {
@@ -1110,12 +1240,24 @@ render_cell(struct terminal *term, pixman_image_t *pix,
                     if (cell_cols > 1)
                         pen_x += term->cell_width;
 
+                    pixman_image_t *cmask = g->pix;
+                    pixman_image_t *cadj_mask = NULL;
+
+                    if (alpha_lut != NULL &&
+                        !pixman_image_get_component_alpha(g->pix))
+                    {
+                        cadj_mask = create_contrast_mask(g, alpha_lut);
+                        if (cadj_mask != NULL)
+                            cmask = cadj_mask;
+                    }
+
                     pixman_image_composite32(
-                        PIXMAN_OP_OVER, clr_pix, g->pix, pix, 0, 0, 0, 0,
-                        /* Some fonts use a negative offset, while others use a
-                         * "normal" offset */
+                        PIXMAN_OP_OVER, clr_pix, cmask, pix, 0, 0, 0, 0,
                         pen_x + letter_x_ofs + x_ofs + g->x,
                         y + term->font_baseline - g->y, g->width, g->height);
+
+                    if (cadj_mask != NULL)
+                        pixman_image_unref(cadj_mask);
                 }
             }
         }

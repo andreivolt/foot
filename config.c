@@ -2806,6 +2806,9 @@ parse_section_tweak(struct context *ctx)
     else if (streq(key, "overflowing-glyphs"))
         return value_to_bool(ctx, &conf->tweak.overflowing_glyphs);
 
+    else if (streq(key, "text-thickness-compensation"))
+        return value_to_float(ctx, &conf->tweak.text_thickness_compensation);
+
     else if (streq(key, "damage-whole-window"))
         return value_to_bool(ctx, &conf->tweak.damage_whole_window);
 
@@ -3477,7 +3480,7 @@ config_load(struct config *conf, const char *conf_path,
         .underline_thickness = {.pt = 0., .px = -1},
         .strikeout_thickness = {.pt = 0., .px = -1},
         .dpi_aware = false,
-        .gamma_correct = false,
+        .gamma_correct = true,
         .uppercase_regex_insert = true,
         .security = {
             .osc52 = OSC52_ENABLED,
@@ -3591,6 +3594,7 @@ config_load(struct config *conf, const char *conf_path,
             .surface_bit_depth = SHM_BITS_AUTO,
             .min_stride_alignment = 256,
             .preapply_damage = true,
+            .text_thickness_compensation = 0.25f,
         },
 
         .touch = {

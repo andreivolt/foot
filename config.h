@@ -445,6 +445,7 @@ struct config {
         enum shm_bit_depth surface_bit_depth;
         uint32_t min_stride_alignment;
         bool preapply_damage;
+        float text_thickness_compensation;
     } tweak;
 
     struct {
