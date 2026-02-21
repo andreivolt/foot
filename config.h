@@ -220,6 +220,7 @@ struct config {
     char *term;
     char *shell;
     char *title;
+    char *scrollback_pager;
     char *app_id;
     char *toplevel_tag;
     char32_t *word_delimiters;

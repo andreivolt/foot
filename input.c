@@ -10,6 +10,7 @@
 #include <sys/mman.h>
 #include <sys/timerfd.h>
 #include <sys/epoll.h>
+#include <sys/ioctl.h>
 #include <fcntl.h>
 
 #include <linux/input-event-codes.h>
@@ -80,6 +81,32 @@ pipe_closed:
     free(ctx);
     fdm_del(fdm, fd);
     return true;
+}
+
+struct pager_context {
+    struct terminal *term;
+    char *tmpfile;
+    pid_t shell_pgrp;
+};
+
+static void
+pager_reaper_cb(struct reaper *reaper, pid_t pid, int status, void *data)
+{
+    struct pager_context *ctx = data;
+
+    LOG_INFO("scrollback pager (pid %d) exited with status %d", pid, status);
+
+    /* Resume the shell process group */
+    if (killpg(ctx->shell_pgrp, SIGCONT) < 0)
+        LOG_ERRNO("failed to resume shell process group %d", ctx->shell_pgrp);
+
+    /* Clean up temp file */
+    if (ctx->tmpfile != NULL) {
+        unlink(ctx->tmpfile);
+        free(ctx->tmpfile);
+    }
+
+    free(ctx);
 }
 
 static void alternate_scroll(struct seat *seat, int amount, int button);
@@ -230,6 +257,123 @@ execute_binding(struct seat *seat, struct terminal *term,
         else
             xdg_toplevel_set_fullscreen(term->window->xdg_toplevel, NULL);
         return true;
+
+    case BIND_ACTION_SCROLLBACK_PAGER: {
+        if (term->grid == &term->alt)
+            break;
+
+        const char *pager_cmd = term->conf->scrollback_pager;
+        if (pager_cmd == NULL || pager_cmd[0] == '\0') {
+            LOG_WARN("scrollback-pager: no pager command configured");
+            return true;
+        }
+
+        /* Extract scrollback content */
+        char *text = NULL;
+        size_t len = 0;
+        if (!term_scrollback_to_text(term, &text, &len) || len == 0) {
+            free(text);
+            LOG_WARN("scrollback-pager: no scrollback content");
+            return true;
+        }
+
+        /* Write scrollback to temp file */
+        char tmpfile[] = "/tmp/foot-scrollback-XXXXXX";
+        int tmpfd = mkstemp(tmpfile);
+        if (tmpfd < 0) {
+            LOG_ERRNO("scrollback-pager: failed to create temp file");
+            free(text);
+            return true;
+        }
+
+        /* Write all content to temp file */
+        {
+            size_t written_total = 0;
+            while (written_total < len) {
+                ssize_t w = write(tmpfd, text + written_total, len - written_total);
+                if (w < 0) {
+                    LOG_ERRNO("scrollback-pager: failed to write temp file");
+                    close(tmpfd);
+                    unlink(tmpfile);
+                    free(text);
+                    return true;
+                }
+                written_total += w;
+            }
+        }
+        close(tmpfd);
+        free(text);
+
+        /* Get slave PTY name before forking */
+        const char *pts_name = ptsname(term->ptmx);
+        if (pts_name == NULL) {
+            LOG_ERRNO("scrollback-pager: ptsname failed");
+            unlink(tmpfile);
+            return true;
+        }
+
+        /* Suspend the shell process group */
+        pid_t shell_pgrp = tcgetpgrp(term->ptmx);
+        if (shell_pgrp < 0) {
+            LOG_ERRNO("scrollback-pager: tcgetpgrp failed");
+            unlink(tmpfile);
+            return true;
+        }
+
+        if (killpg(shell_pgrp, SIGTSTP) < 0) {
+            LOG_ERRNO("scrollback-pager: failed to stop shell pgrp %d",
+                      shell_pgrp);
+            unlink(tmpfile);
+            return true;
+        }
+
+        pid_t pager_pid = fork();
+        if (pager_pid < 0) {
+            LOG_ERRNO("scrollback-pager: fork failed");
+            killpg(shell_pgrp, SIGCONT);
+            unlink(tmpfile);
+            return true;
+        }
+
+        if (pager_pid == 0) {
+            /* Child: set up new session on the slave PTY */
+            setsid();
+
+            int pts = open(pts_name, O_RDWR);
+            if (pts < 0)
+                _exit(1);
+
+            ioctl(pts, TIOCSCTTY, 0);
+
+            dup2(pts, STDIN_FILENO);
+            dup2(pts, STDOUT_FILENO);
+            dup2(pts, STDERR_FILENO);
+            if (pts > STDERR_FILENO)
+                close(pts);
+
+            /* Make ourselves the foreground process group */
+            tcsetpgrp(STDIN_FILENO, getpid());
+
+            /* Exec: sh -c 'pager_cmd tmpfile' */
+            char cmd_buf[4096];
+            snprintf(cmd_buf, sizeof(cmd_buf), "%s %s", pager_cmd, tmpfile);
+            execlp("sh", "sh", "-c", cmd_buf, (char *)NULL);
+            _exit(1);
+        }
+
+        /* Parent: track pager child */
+        struct pager_context *ctx = xmalloc(sizeof(*ctx));
+        *ctx = (struct pager_context){
+            .term = term,
+            .tmpfile = xstrdup(tmpfile),
+            .shell_pgrp = shell_pgrp,
+        };
+
+        reaper_add(term->reaper, pager_pid, pager_reaper_cb, ctx);
+        LOG_INFO("scrollback-pager: launched pid %d, shell pgrp %d suspended",
+                 pager_pid, shell_pgrp);
+        return true;
+    }
 
     case BIND_ACTION_PIPE_SCROLLBACK:
         if (term->grid == &term->alt)

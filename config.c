@@ -147,6 +147,7 @@ static const char *const binding_action_map[] = {
     [BIND_ACTION_THEME_SWITCH_DARK] = "color-theme-switch-dark",
     [BIND_ACTION_THEME_SWITCH_LIGHT] = "color-theme-switch-light",
     [BIND_ACTION_THEME_TOGGLE] = "color-theme-toggle",
+    [BIND_ACTION_SCROLLBACK_PAGER] = "scrollback-pager",
 
     /* Mouse-specific actions */
     [BIND_ACTION_SCROLLBACK_UP_MOUSE] = "scrollback-up-mouse",
@@ -912,6 +913,9 @@ parse_section_main(struct context *ctx)
 
     else if (streq(key, "shell"))
         return value_to_str(ctx, &conf->shell);
+
+    else if (streq(key, "scrollback-pager"))
+        return value_to_str(ctx, &conf->scrollback_pager);
 
     else if (streq(key, "login-shell"))
         return value_to_bool(ctx, &conf->login_shell);
@@ -3447,6 +3451,7 @@ config_load(struct config *conf, const char *conf_path,
     *conf = (struct config) {
         .term = xstrdup(FOOT_DEFAULT_TERM),
         .shell = get_shell(),
+        .scrollback_pager = NULL,
         .title = xstrdup("foot"),
         .app_id = (as_server ? xstrdup("footclient") : xstrdup("foot")),
         .toplevel_tag = xstrdup(""),
@@ -3901,6 +3906,7 @@ config_clone(const struct config *old)
 
     conf->term = xstrdup(old->term);
     conf->shell = xstrdup(old->shell);
+    conf->scrollback_pager = old->scrollback_pager ? xstrdup(old->scrollback_pager) : NULL;
     conf->title = xstrdup(old->title);
     conf->app_id = xstrdup(old->app_id);
     conf->toplevel_tag = xstrdup(old->toplevel_tag);
@@ -4001,6 +4007,7 @@ config_free(struct config *conf)
 {
     free(conf->term);
     free(conf->shell);
+    free(conf->scrollback_pager);
     free(conf->title);
     free(conf->app_id);
     free(conf->toplevel_tag);
