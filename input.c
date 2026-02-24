@@ -94,7 +94,9 @@ pager_reaper_cb(struct reaper *reaper, pid_t pid, int status, void *data)
 {
     struct pager_context *ctx = data;
 
-    LOG_INFO("scrollback pager (pid %d) exited with status %d", pid, status);
+    LOG_INFO("scrollback pager (pid %d) exited, status=%d, signal=%d",
+             pid, WIFEXITED(status) ? WEXITSTATUS(status) : -1,
+             WIFSIGNALED(status) ? WTERMSIG(status) : -1);
 
     /* Restore shell as foreground process group via master PTY */
     pid_t pgrp = ctx->shell_pgrp;
@@ -102,8 +104,11 @@ pager_reaper_cb(struct reaper *reaper, pid_t pid, int status, void *data)
         LOG_ERRNO("failed to restore shell foreground pgrp %d", pgrp);
 
     /* Resume the shell process group */
-    if (killpg(ctx->shell_pgrp, SIGCONT) < 0)
-        LOG_ERRNO("failed to resume shell process group %d", ctx->shell_pgrp);
+    if (kill(-ctx->shell_pgrp, SIGCONT) < 0) {
+        /* Try sending to process directly if group fails */
+        LOG_ERRNO("killpg SIGCONT to %d failed, trying kill", ctx->shell_pgrp);
+        kill(ctx->shell_pgrp, SIGCONT);
+    }
 
     /* Clean up temp file */
     if (ctx->tmpfile != NULL) {
@@ -338,6 +343,9 @@ execute_binding(struct seat *seat, struct terminal *term,
 
             /* Close master PTY fd inherited from parent */
             close(term->ptmx);
+
+            /* Set TERM so pager knows terminal capabilities */
+            setenv("TERM", term->conf->term, 1);
 
             /* Exec: sh -c 'pager_cmd tmpfile' */
             char cmd_buf[4096];
