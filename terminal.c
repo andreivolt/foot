@@ -4502,6 +4502,230 @@ term_scrollback_to_text(const struct terminal *term, char **text, size_t *len)
     return rows_to_text(term, start, end, 0, term->cols, text, len);
 }
 
+static bool
+ansi_write(int fd, const char *buf, size_t len)
+{
+    size_t written = 0;
+    while (written < len) {
+        ssize_t w = write(fd, buf + written, len - written);
+        if (w < 0)
+            return false;
+        written += w;
+    }
+    return true;
+}
+
+static size_t
+ansi_emit_sgr(char *buf, size_t bufsize, const struct attributes *a)
+{
+    /* Build SGR sequence: \e[...m */
+    size_t pos = 0;
+    pos += snprintf(buf + pos, bufsize - pos, "\033[0");
+
+    if (a->bold)          pos += snprintf(buf + pos, bufsize - pos, ";1");
+    if (a->dim)           pos += snprintf(buf + pos, bufsize - pos, ";2");
+    if (a->italic)        pos += snprintf(buf + pos, bufsize - pos, ";3");
+    if (a->underline)     pos += snprintf(buf + pos, bufsize - pos, ";4");
+    if (a->blink)         pos += snprintf(buf + pos, bufsize - pos, ";5");
+    if (a->reverse)       pos += snprintf(buf + pos, bufsize - pos, ";7");
+    if (a->conceal)       pos += snprintf(buf + pos, bufsize - pos, ";8");
+    if (a->strikethrough) pos += snprintf(buf + pos, bufsize - pos, ";9");
+
+    /* Foreground color */
+    switch (a->fg_src) {
+    case COLOR_DEFAULT:
+        break;
+    case COLOR_BASE16:
+        if (a->fg < 8)
+            pos += snprintf(buf + pos, bufsize - pos, ";%u", 30 + a->fg);
+        else if (a->fg < 16)
+            pos += snprintf(buf + pos, bufsize - pos, ";%u", 90 + a->fg - 8);
+        else
+            pos += snprintf(buf + pos, bufsize - pos, ";38;5;%u", a->fg);
+        break;
+    case COLOR_BASE256:
+        pos += snprintf(buf + pos, bufsize - pos, ";38;5;%u", a->fg);
+        break;
+    case COLOR_RGB:
+        pos += snprintf(buf + pos, bufsize - pos, ";38;2;%u;%u;%u",
+                        (a->fg >> 16) & 0xff,
+                        (a->fg >> 8) & 0xff,
+                        a->fg & 0xff);
+        break;
+    }
+
+    /* Background color */
+    switch (a->bg_src) {
+    case COLOR_DEFAULT:
+        break;
+    case COLOR_BASE16:
+        if (a->bg < 8)
+            pos += snprintf(buf + pos, bufsize - pos, ";%u", 40 + a->bg);
+        else if (a->bg < 16)
+            pos += snprintf(buf + pos, bufsize - pos, ";%u", 100 + a->bg - 8);
+        else
+            pos += snprintf(buf + pos, bufsize - pos, ";48;5;%u", a->bg);
+        break;
+    case COLOR_BASE256:
+        pos += snprintf(buf + pos, bufsize - pos, ";48;5;%u", a->bg);
+        break;
+    case COLOR_RGB:
+        pos += snprintf(buf + pos, bufsize - pos, ";48;2;%u;%u;%u",
+                        (a->bg >> 16) & 0xff,
+                        (a->bg >> 8) & 0xff,
+                        a->bg & 0xff);
+        break;
+    }
+
+    pos += snprintf(buf + pos, bufsize - pos, "m");
+    return pos;
+}
+
+static bool
+attrs_equal(const struct attributes *a, const struct attributes *b)
+{
+    return a->bold == b->bold && a->dim == b->dim && a->italic == b->italic &&
+           a->underline == b->underline && a->strikethrough == b->strikethrough &&
+           a->blink == b->blink && a->conceal == b->conceal &&
+           a->reverse == b->reverse && a->fg_src == b->fg_src &&
+           a->bg_src == b->bg_src && a->fg == b->fg && a->bg == b->bg;
+}
+
+bool
+term_scrollback_to_ansi(const struct terminal *term, int fd)
+{
+    const struct grid *grid = term->grid;
+    const int grid_rows = grid->num_rows;
+    int start = (grid->offset + term->rows) & (grid_rows - 1);
+    int end = (grid->offset + term->rows - 1) & (grid_rows - 1);
+
+    while (grid->rows[start] == NULL) {
+        start++;
+        start &= grid_rows - 1;
+        if (start == end)
+            return true;  /* empty scrollback */
+    }
+
+    while (grid->rows[end] == NULL) {
+        end--;
+        if (end < 0)
+            end += grid_rows;
+    }
+
+    /* Write buffer - flush in chunks */
+    char wbuf[8192];
+    size_t wpos = 0;
+    char sgr[128];
+
+    struct attributes prev_attrs = {0};
+    bool first_cell = true;
+    int r = start;
+
+    for (;;) {
+        const struct row *row = grid->rows[r];
+
+        if (row != NULL && row->cells != NULL) {
+            /* Find last non-empty cell for trimming trailing spaces */
+            int last_col = term->cols - 1;
+            while (last_col >= 0 && row->cells[last_col].wc == 0)
+                last_col--;
+
+            for (int c = 0; c <= last_col; c++) {
+                const struct cell *cell = &row->cells[c];
+
+                if (cell->wc >= CELL_SPACER)
+                    continue;
+
+                /* Emit SGR if attributes changed */
+                if (first_cell || !attrs_equal(&cell->attrs, &prev_attrs)) {
+                    size_t sgr_len = ansi_emit_sgr(sgr, sizeof(sgr), &cell->attrs);
+                    if (wpos + sgr_len > sizeof(wbuf)) {
+                        if (!ansi_write(fd, wbuf, wpos))
+                            return false;
+                        wpos = 0;
+                    }
+                    memcpy(wbuf + wpos, sgr, sgr_len);
+                    wpos += sgr_len;
+                    prev_attrs = cell->attrs;
+                    first_cell = false;
+                }
+
+                /* Emit character as UTF-8 */
+                char utf8[16];
+                size_t utf8_len = 0;
+
+                if (cell->wc == 0) {
+                    utf8[0] = ' ';
+                    utf8_len = 1;
+                } else if (cell->wc >= CELL_COMB_CHARS_LO &&
+                           cell->wc <= CELL_COMB_CHARS_HI)
+                {
+                    const struct composed *comp = composed_lookup(
+                        term->composed, cell->wc - CELL_COMB_CHARS_LO);
+                    if (comp != NULL) {
+                        for (size_t i = 0; i < comp->count && utf8_len < sizeof(utf8) - 4; i++) {
+                            int n = c32rtomb(utf8 + utf8_len, comp->chars[i], &(mbstate_t){0});
+                            if (n > 0)
+                                utf8_len += n;
+                        }
+                    }
+                } else {
+                    int n = c32rtomb(utf8, cell->wc, &(mbstate_t){0});
+                    if (n > 0)
+                        utf8_len = n;
+                }
+
+                if (utf8_len > 0) {
+                    if (wpos + utf8_len > sizeof(wbuf)) {
+                        if (!ansi_write(fd, wbuf, wpos))
+                            return false;
+                        wpos = 0;
+                    }
+                    memcpy(wbuf + wpos, utf8, utf8_len);
+                    wpos += utf8_len;
+                }
+            }
+        }
+
+        if (r == end)
+            break;
+
+        /* Newline + reset at end of row */
+        const char *nl = "\033[0m\n";
+        size_t nl_len = 5;
+        if (wpos + nl_len > sizeof(wbuf)) {
+            if (!ansi_write(fd, wbuf, wpos))
+                return false;
+            wpos = 0;
+        }
+        memcpy(wbuf + wpos, nl, nl_len);
+        wpos += nl_len;
+        first_cell = true;
+        prev_attrs = (struct attributes){0};
+
+        r++;
+        r &= grid_rows - 1;
+    }
+
+    /* Final reset + flush */
+    const char *reset = "\033[0m\n";
+    size_t reset_len = 5;
+    if (wpos + reset_len > sizeof(wbuf)) {
+        if (!ansi_write(fd, wbuf, wpos))
+            return false;
+        wpos = 0;
+    }
+    memcpy(wbuf + wpos, reset, reset_len);
+    wpos += reset_len;
+
+    if (wpos > 0) {
+        if (!ansi_write(fd, wbuf, wpos))
+            return false;
+    }
+
+    return true;
+}
+
 bool
 term_view_to_text(const struct terminal *term, char **text, size_t *len)
 {

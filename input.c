@@ -273,41 +273,21 @@ execute_binding(struct seat *seat, struct terminal *term,
             return true;
         }
 
-        /* Extract scrollback content */
-        char *text = NULL;
-        size_t len = 0;
-        if (!term_scrollback_to_text(term, &text, &len) || len == 0) {
-            free(text);
-            LOG_WARN("scrollback-pager: no scrollback content");
-            return true;
-        }
-
-        /* Write scrollback to temp file */
+        /* Write scrollback with ANSI color codes to temp file */
         char tmpfile[] = "/tmp/foot-scrollback-XXXXXX";
         int tmpfd = mkstemp(tmpfile);
         if (tmpfd < 0) {
             LOG_ERRNO("scrollback-pager: failed to create temp file");
-            free(text);
             return true;
         }
 
-        /* Write all content to temp file */
-        {
-            size_t written_total = 0;
-            while (written_total < len) {
-                ssize_t w = write(tmpfd, text + written_total, len - written_total);
-                if (w < 0) {
-                    LOG_ERRNO("scrollback-pager: failed to write temp file");
-                    close(tmpfd);
-                    unlink(tmpfile);
-                    free(text);
-                    return true;
-                }
-                written_total += w;
-            }
+        if (!term_scrollback_to_ansi(term, tmpfd)) {
+            LOG_WARN("scrollback-pager: failed to write ANSI scrollback");
+            close(tmpfd);
+            unlink(tmpfile);
+            return true;
         }
         close(tmpfd);
-        free(text);
 
         /* Get slave PTY name before forking */
         const char *pts_name = ptsname(term->ptmx);

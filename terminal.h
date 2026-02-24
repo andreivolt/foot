@@ -969,6 +969,8 @@ enum term_surface term_surface_kind(
 
 bool term_scrollback_to_text(
     const struct terminal *term, char **text, size_t *len);
+bool term_scrollback_to_ansi(
+    const struct terminal *term, int fd);
 bool term_view_to_text(
     const struct terminal *term, char **text, size_t *len);
 bool term_command_output_to_text(
