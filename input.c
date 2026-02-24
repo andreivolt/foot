@@ -84,7 +84,7 @@ pipe_closed:
 }
 
 struct pager_context {
-    struct terminal *term;
+    int ptmx;
     char *tmpfile;
     pid_t shell_pgrp;
 };
@@ -95,6 +95,11 @@ pager_reaper_cb(struct reaper *reaper, pid_t pid, int status, void *data)
     struct pager_context *ctx = data;
 
     LOG_INFO("scrollback pager (pid %d) exited with status %d", pid, status);
+
+    /* Restore shell as foreground process group via master PTY */
+    pid_t pgrp = ctx->shell_pgrp;
+    if (ioctl(ctx->ptmx, TIOCSPGRP, &pgrp) < 0)
+        LOG_ERRNO("failed to restore shell foreground pgrp %d", pgrp);
 
     /* Resume the shell process group */
     if (killpg(ctx->shell_pgrp, SIGCONT) < 0)
@@ -336,14 +341,11 @@ execute_binding(struct seat *seat, struct terminal *term,
         }
 
         if (pager_pid == 0) {
-            /* Child: set up new session on the slave PTY */
-            setsid();
-
+            /* Child: open slave PTY for stdio, NO setsid/TIOCSCTTY
+             * to avoid stealing the controlling terminal from the shell */
             int pts = open(pts_name, O_RDWR);
             if (pts < 0)
                 _exit(1);
-
-            ioctl(pts, TIOCSCTTY, 0);
 
             dup2(pts, STDIN_FILENO);
             dup2(pts, STDOUT_FILENO);
@@ -351,8 +353,11 @@ execute_binding(struct seat *seat, struct terminal *term,
             if (pts > STDERR_FILENO)
                 close(pts);
 
-            /* Make ourselves the foreground process group */
-            tcsetpgrp(STDIN_FILENO, getpid());
+            /* Create own process group */
+            setpgid(0, 0);
+
+            /* Close master PTY fd inherited from parent */
+            close(term->ptmx);
 
             /* Exec: sh -c 'pager_cmd tmpfile' */
             char cmd_buf[4096];
@@ -361,10 +366,17 @@ execute_binding(struct seat *seat, struct terminal *term,
             _exit(1);
         }
 
-        /* Parent: track pager child */
+        /* Parent: put child in its own process group and make it foreground */
+        setpgid(pager_pid, pager_pid);
+
+        pid_t pgrp = pager_pid;
+        if (ioctl(term->ptmx, TIOCSPGRP, &pgrp) < 0)
+            LOG_ERRNO("scrollback-pager: failed to set foreground pgrp");
+
+        /* Track pager child */
         struct pager_context *ctx = xmalloc(sizeof(*ctx));
         *ctx = (struct pager_context){
-            .term = term,
+            .ptmx = term->ptmx,
             .tmpfile = xstrdup(tmpfile),
             .shell_pgrp = shell_pgrp,
         };
