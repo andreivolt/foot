@@ -347,6 +347,10 @@ execute_binding(struct seat *seat, struct terminal *term,
             /* Set TERM so pager knows terminal capabilities */
             setenv("TERM", term->conf->term, 1);
 
+            /* Prevent less 'v' command from opening an editor */
+            unsetenv("VISUAL");
+            unsetenv("EDITOR");
+
             /* Exec: sh -c 'pager_cmd tmpfile' */
             char cmd_buf[4096];
             snprintf(cmd_buf, sizeof(cmd_buf), "%s %s", pager_cmd, tmpfile);
